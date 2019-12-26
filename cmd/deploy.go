@@ -9,6 +9,7 @@ import (
 	"os/exec"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/gookit/color.v1"
 	"gopkg.in/yaml.v2"
 )
 
@@ -40,8 +41,9 @@ var (
 			return fmt.Errorf("impossible de trouver l'application %s", args[0])
 		},
 	}
-	cfgFile string
-	cfg     config
+	cfgFile               string
+	cfg                   config
+	noBackend, noFrontend bool
 )
 
 type config struct {
@@ -90,6 +92,10 @@ func init() {
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "",
 		"fichier de configuration, par défaut ~/.fsd.yaml")
+	deployCmd.PersistentFlags().BoolVarP(&noBackend, "noBack", "b", false,
+		"éviter de recompiler le backend")
+	deployCmd.PersistentFlags().BoolVarP(&noFrontend, "noFront", "f", false,
+		"éviter de recompiler le frontend")
 }
 
 func initConfig() {
@@ -113,16 +119,21 @@ func initConfig() {
 }
 
 func launch(c fullStackCfg) error {
-	fmt.Println("Compilation du backend")
-	if err := launchPart(c.BackEnd); err != nil {
-		return err
+	if !noBackend {
+		color.Info.Println("Compilation du backend")
+		if err := launchPart(c.BackEnd); err != nil {
+			return err
+		}
 	}
-	fmt.Println("Compilation du frontend")
-	if err := launchPart(c.FrontEnd); err != nil {
-		return err
+	if !noFrontend {
+		color.Info.Println("Compilation du frontend")
+		if err := launchPart(c.FrontEnd); err != nil {
+			return err
+		}
 	}
-	fmt.Println("Déploiement")
-	return launchDeploy(c.Deploy)
+	color.Info.Println("Déploiement")
+	// return launchDeploy(c.Deploy)
+	return nil
 }
 
 func launchPart(p partCfg) error {

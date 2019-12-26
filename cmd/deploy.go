@@ -113,10 +113,10 @@ func initConfig() {
 }
 
 func launch(c fullStackCfg) error {
-	// fmt.Println("Compilation du backend")
-	// if err := launchPart(c.BackEnd); err != nil {
-	// 	return err
-	// }
+	fmt.Println("Compilation du backend")
+	if err := launchPart(c.BackEnd); err != nil {
+		return err
+	}
 	fmt.Println("Compilation du frontend")
 	if err := launchPart(c.FrontEnd); err != nil {
 		return err

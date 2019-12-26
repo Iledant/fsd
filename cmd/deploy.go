@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/gookit/color.v1"
@@ -65,11 +67,9 @@ type partCfg struct {
 }
 
 type deployCfg struct {
-	Path      string   `yaml:"path"`
-	Command   string   `yaml:"command"`
-	Args      []string `yaml:"args"`
-	Dist      dist     `yaml:"dist"`
-	AppSource string   `yaml:"app_source"`
+	Path      string `yaml:"path"`
+	Dist      dist   `yaml:"dist"`
+	AppSource string `yaml:"app_source"`
 }
 
 type dist struct {
@@ -132,8 +132,7 @@ func launch(c fullStackCfg) error {
 		}
 	}
 	color.Info.Println("Déploiement")
-	// return launchDeploy(c.Deploy)
-	return nil
+	return launchDeploy(c.Deploy)
 }
 
 func launchPart(p partCfg) error {
@@ -155,6 +154,39 @@ func launchPart(p partCfg) error {
 	return nil
 }
 
+func getEBVersion() string {
+	cmd := exec.Command("eb", "status")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	idx := strings.Index(string(out), "Deployed Version:")
+	if idx == -1 {
+		return ""
+	}
+	extract := out[idx+18:]
+	var i, j int
+	for i = 0; i < len(extract); i++ {
+		if extract[i] == '\n' {
+			j = i
+			break
+		}
+	}
+	if j == 0 {
+		return ""
+	}
+	return string(extract[:j])
+}
+
+func getGitVersion() string {
+	cmd := exec.Command("git", "describe")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
 func launchDeploy(d deployCfg) error {
 	if err := os.Chdir(d.Path); err != nil {
 		return fmt.Errorf("changement de répertoire %s : %v", d.Path, err)
@@ -169,15 +201,62 @@ func launchDeploy(d deployCfg) error {
 	if err := copyFilesAndDirs(d.Dist.Source, dest); err != nil {
 		return err
 	}
-	cmd := exec.Command(d.Command)
-	for _, a := range d.Args {
-		cmd.Args = append(cmd.Args, a)
+
+	ebVersion := getEBVersion()
+	gitVersion := getGitVersion()
+	fmt.Println("Version eb " + ebVersion)
+	fmt.Println("Version git " + gitVersion)
+
+	color.Yellow.Print("Numéro de version : ")
+	scanner := bufio.NewScanner(os.Stdin)
+
+	scanner.Scan()
+	version := scanner.Text()
+	if version == "" {
+		return errors.New("Numéro de version nécessaire")
 	}
+
+	scanner.Scan()
+	comment := scanner.Text()
+	if comment == "" {
+		return errors.New("Aucun commentaire fourni")
+	}
+
+	cmd := exec.Command("git", "add", ".")
 	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("erreur d'exécution : %v", err)
+		return fmt.Errorf("erreur d'exécution git add : %v", err)
 	}
 	fmt.Printf("%s", out)
+
+	cmd = exec.Command("git", "update-index", "--chmod=+x", "bin/application")
+	out, err = cmd.Output()
+	if err != nil {
+		return fmt.Errorf("erreur d'exécution git update-index : %v", err)
+	}
+	fmt.Printf("%s", out)
+
+	cmd = exec.Command("git", "commit", "-m", comment)
+	out, err = cmd.Output()
+	if err != nil {
+		return fmt.Errorf("erreur d'exécution git commit : %v", err)
+	}
+	fmt.Printf("%s", out)
+
+	cmd = exec.Command("git", "tag", "-a", version, "-m", comment)
+	out, err = cmd.Output()
+	if err != nil {
+		return fmt.Errorf("erreur d'exécution git tag : %v", err)
+	}
+	fmt.Printf("%s", out)
+
+	cmd = exec.Command("eb", "deploy", "-l", version, "-m", comment)
+	out, err = cmd.Output()
+	if err != nil {
+		return fmt.Errorf("erreur d'exécution eb deploy : %v", err)
+	}
+	fmt.Printf("%s", out)
+
 	return nil
 }
 

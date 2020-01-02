@@ -101,7 +101,11 @@ func launchPart(p partCfg) <-chan error {
 			e <- err
 			return
 		}
-		fmt.Print(out)
+		if len(out) > 0 {
+			fmt.Print(string(out))
+		} else {
+			fmt.Println("Fin de " + p.Message)
+		}
 		e <- nil
 	}()
 

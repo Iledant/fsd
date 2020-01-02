@@ -3,6 +3,7 @@ package cmd
 import (
 	"io/ioutil"
 	"os"
+	"path"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
@@ -73,12 +74,13 @@ func init() {
 func initConfig() {
 	var err error
 	if cfgFile == "" {
-		cfgFile, err = os.UserHomeDir()
+		userHomeDir, err := os.UserHomeDir()
 		if err != nil {
 			PrintErrMsg("Impossible de récupérer le chemin du dossier utilisateur : " +
 				err.Error())
 			os.Exit(1)
 		}
+		cfgFile = path.Join(userHomeDir, ".fsd.yaml")
 	}
 	content, err := ioutil.ReadFile(cfgFile)
 	if err != nil {

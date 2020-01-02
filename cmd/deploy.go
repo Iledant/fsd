@@ -220,7 +220,7 @@ func launchDeploy(d deployCfg) error {
 			}
 			return err
 		}
-		fmt.Print(out)
+		fmt.Print(string(out))
 	}
 
 	return nil

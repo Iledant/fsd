@@ -62,6 +62,7 @@ func Execute() error {
 func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.AddCommand(deployCmd)
+	rootCmd.AddCommand(listCommand)
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "",
 		"fichier de configuration, par défaut ~/.fsd.yaml")
 

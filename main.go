@@ -11,5 +11,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-
-// TODO : faire une liste des applications dans le fichier de configuration

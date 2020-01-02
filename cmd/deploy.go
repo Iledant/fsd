@@ -1,38 +1,39 @@
 package cmd
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/gookit/color.v1"
-	"gopkg.in/yaml.v2"
 )
 
 var (
-	rootCmd = &cobra.Command{
-		Use:   "fsd",
-		Short: "Utilitaire pour le déploiement d'applications sur AWS",
-	}
 	deployCmd = &cobra.Command{
-		Use:   "deploy",
-		Short: "Compile le backend et le frontend et le déploie sur AWS",
+		Use:           "deploy <nom de l'application>",
+		Short:         "Compile le backend et le frontend et le déploie sur AWS",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return errors.New("deploy ne prend qu'un argument : le nom de l'application")
+				errMsg := "Nom de l'application à déployer absent"
+				PrintErrMsg(errMsg)
+				return errors.New(errMsg)
 			}
 			for _, app := range cfg.Application {
 				if args[0] == app.Name {
 					return nil
 				}
 			}
-			return errors.New("application non trouvée dans le fichier de configuration")
+			errMsg := "Impossible de trouver l'application \"" + args[0] +
+				"\" dans le fichier de configuration"
+			PrintErrMsg(errMsg)
+			return errors.New(errMsg)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			for _, a := range cfg.Application {
@@ -40,118 +41,71 @@ var (
 					return launch(a)
 				}
 			}
-			return fmt.Errorf("impossible de trouver l'application %s", args[0])
+			return nil
 		},
 	}
-	cfgFile               string
-	cfg                   config
 	noBackend, noFrontend bool
 )
 
-type config struct {
-	Application []fullStackCfg `yaml:"application"`
-}
-
-type fullStackCfg struct {
-	Name     string    `yaml:"name"`
-	BackEnd  partCfg   `yaml:"backend"`
-	FrontEnd partCfg   `yaml:"frontend"`
-	Deploy   deployCfg `yaml:"deploy"`
-}
-
-type partCfg struct {
-	Path        string   `yaml:"path"`
-	Command     string   `yaml:"command"`
-	Args        []string `yaml:"args"`
-	Environment []envVar `yaml:"environment"`
-}
-
-type deployCfg struct {
-	Path      string `yaml:"path"`
-	Dist      dist   `yaml:"dist"`
-	AppSource string `yaml:"app_source"`
-}
-
-type dist struct {
-	Source string `yaml:"source"`
-	Dest   string `yaml:"dest"`
-}
-
-type envVar struct {
-	Name  string `yaml:"name"`
-	Value string `yaml:"value"`
-}
-
-// Execute launches the deploy command
-func Execute() error {
-	return rootCmd.Execute()
-}
-
-func init() {
-	cobra.OnInitialize(initConfig)
-	rootCmd.AddCommand(deployCmd)
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "",
-		"fichier de configuration, par défaut ~/.fsd.yaml")
-	deployCmd.PersistentFlags().BoolVarP(&noBackend, "noBack", "b", false,
-		"éviter de recompiler le backend")
-	deployCmd.PersistentFlags().BoolVarP(&noFrontend, "noFront", "f", false,
-		"éviter de recompiler le frontend")
-}
-
-func initConfig() {
-	var err error
-	if cfgFile == "" {
-		cfgFile, err = os.UserHomeDir()
-		if err != nil {
-			fmt.Printf("impossible de récupérer le chemin du dossier utilisateur %v", err)
-			os.Exit(1)
-		}
-	}
-	content, err := ioutil.ReadFile(cfgFile)
-	if err != nil {
-		fmt.Printf("impossible de lire le fichier de configuration %v", err)
-		os.Exit(1)
-	}
-	if err = yaml.Unmarshal(content, &cfg); err != nil {
-		fmt.Printf("erreur de décodage du fichier de configuration %v", err)
-		os.Exit(1)
-	}
+type command struct {
+	AppName string
+	AppArgs []string
 }
 
 func launch(c fullStackCfg) error {
-	if !noBackend {
-		color.Info.Println("Compilation du backend")
-		if err := launchPart(c.BackEnd); err != nil {
-			return err
-		}
+	c.BackEnd.Message = "Compilation du backend"
+	c.BackEnd.No = noBackend
+	c.FrontEnd.Message = "Compilation du frontend"
+	c.FrontEnd.No = noFrontend
+
+	bCh, fCh := launchPart(c.BackEnd), launchPart(c.FrontEnd)
+	b, f := <-bCh, <-fCh
+
+	if b != nil {
+		return b
 	}
-	if !noFrontend {
-		color.Info.Println("Compilation du frontend")
-		if err := launchPart(c.FrontEnd); err != nil {
-			return err
-		}
+	if f != nil {
+		return f
 	}
-	color.Info.Println("Déploiement")
+
+	PrintSuccessMsg("Déploiement")
 	return launchDeploy(c.Deploy)
 }
 
-func launchPart(p partCfg) error {
-	if err := os.Chdir(p.Path); err != nil {
-		return fmt.Errorf("changement de répertoire %s : %v", p.Path, err)
-	}
-	cmd := exec.Command(p.Command)
-	for _, a := range p.Args {
-		cmd.Args = append(cmd.Args, a)
-	}
-	for _, e := range p.Environment {
-		os.Setenv(e.Name, e.Value)
-	}
-	out, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("erreur d'exécution : %v", err)
-	}
-	fmt.Printf("%s", out)
-	return nil
+func launchPart(p partCfg) <-chan error {
+	e := make(chan error)
+
+	go func() {
+		defer close(e)
+		if p.No {
+			e <- nil
+			return
+		}
+		PrintSuccessMsg(p.Message)
+		for _, env := range p.Environment {
+			if err := os.Setenv(env.Name, env.Value); err != nil {
+				e <- err
+				return
+			}
+		}
+		cmd := exec.Command(p.Command, p.Args...)
+		cmd.Dir = p.Path
+		out, err := cmd.Output()
+		if err != nil {
+			var errMsg *exec.ExitError
+			if errors.As(err, &errMsg) {
+				PrintErrMsg(string(errMsg.Stderr))
+			} else {
+				PrintErrMsg("Erreur d'exécution de" + p.Command + " : " + err.Error())
+			}
+			e <- err
+			return
+		}
+		fmt.Print(out)
+		e <- nil
+	}()
+
+	return e
 }
 
 func getEBVersion() string {
@@ -168,11 +122,11 @@ func getEBVersion() string {
 	var i, j int
 	for i = 0; i < len(extract); i++ {
 		if extract[i] == '\n' {
-			j = i
+			j = i - 1
 			break
 		}
 	}
-	if j == 0 {
+	if j <= 0 {
 		return ""
 	}
 	return string(extract[:j])
@@ -184,19 +138,31 @@ func getGitVersion() string {
 	if err != nil {
 		return ""
 	}
-	return string(out)
+	l := len(out) - 1
+	for ; l >= 0; l-- {
+		if out[l] != 10 && out[l] != 13 {
+			break
+		}
+	}
+	return string(out[:l+1])
 }
 
 func launchDeploy(d deployCfg) error {
 	if err := os.Chdir(d.Path); err != nil {
-		return fmt.Errorf("changement de répertoire %s : %v", d.Path, err)
+		PrintErrMsg("Erreur lors du changement de répertoire vers " + d.Path +
+			" : " + err.Error())
+		return err
 	}
-	dest := d.Path + "\\" + d.Dist.Dest
+
+	dest := path.Join(d.Path, d.Dist.Dest)
 	if err := os.RemoveAll(dest); err != nil {
-		return fmt.Errorf("suppression du répertoire dist : %v", err)
+		PrintErrMsg("Erreur lors de la suppression du répertoire dist :" + err.Error())
+		return err
 	}
 	if err := os.Mkdir(dest, os.ModeDir|os.ModePerm); err != nil {
-		return fmt.Errorf("changement de répertoire %s : %v", d.Path, err)
+		PrintErrMsg("Erreur lors du changement de répertoire vers " + d.Path +
+			" : " + err.Error())
+		return err
 	}
 	if err := copyFilesAndDirs(d.Dist.Source, dest); err != nil {
 		return err
@@ -204,58 +170,54 @@ func launchDeploy(d deployCfg) error {
 
 	ebVersion := getEBVersion()
 	gitVersion := getGitVersion()
-	fmt.Println("Version eb " + ebVersion)
-	fmt.Println("Version git " + gitVersion)
+	fmt.Printf("Version eb %s, version git %s\n", ebVersion, gitVersion)
 
-	color.Yellow.Print("Numéro de version : ")
-	scanner := bufio.NewScanner(os.Stdin)
-
-	scanner.Scan()
-	version := scanner.Text()
-	if version == "" {
-		return errors.New("Numéro de version nécessaire")
-	}
-
-	scanner.Scan()
-	comment := scanner.Text()
-	if comment == "" {
-		return errors.New("Aucun commentaire fourni")
-	}
-
-	cmd := exec.Command("git", "add", ".")
-	out, err := cmd.Output()
+	version, err := askUser("Numéro de version", true)
 	if err != nil {
-		return fmt.Errorf("erreur d'exécution git add : %v", err)
+		return err
 	}
-	fmt.Printf("%s", out)
 
-	cmd = exec.Command("git", "update-index", "--chmod=+x", "bin/application")
-	out, err = cmd.Output()
+	comment, err := askUser("Commentaire", true)
 	if err != nil {
-		return fmt.Errorf("erreur d'exécution git update-index : %v", err)
+		return err
 	}
-	fmt.Printf("%s", out)
 
-	cmd = exec.Command("git", "commit", "-m", comment)
-	out, err = cmd.Output()
-	if err != nil {
-		return fmt.Errorf("erreur d'exécution git commit : %v", err)
+	commands := []command{
+		{
+			AppName: "git",
+			AppArgs: []string{"add", "."}},
+		{
+			AppName: "git",
+			AppArgs: []string{"update-index", "--chmod=+x", "bin/application"}},
+		{
+			AppName: "git",
+			AppArgs: []string{"commit", "-m", comment}},
+		{
+			AppName: "git",
+			AppArgs: []string{"tag", "-a", version, "-m", comment}},
+		{
+			AppName: "eb",
+			AppArgs: []string{"deploy", "-l", version, "-m", comment}},
 	}
-	fmt.Printf("%s", out)
 
-	cmd = exec.Command("git", "tag", "-a", version, "-m", comment)
-	out, err = cmd.Output()
-	if err != nil {
-		return fmt.Errorf("erreur d'exécution git tag : %v", err)
+	for _, c := range commands {
+		cmd := exec.Command(c.AppName, c.AppArgs...)
+		out, err := cmd.Output()
+		if err != nil {
+			describe := c.AppName
+			if len(c.AppArgs) > 0 {
+				describe = describe + c.AppArgs[0]
+			}
+			var errMsg *exec.ExitError
+			if errors.As(err, &errMsg) {
+				PrintErrMsg("Erreur d'exécution de " + describe + " : " + string(errMsg.Stderr))
+			} else {
+				PrintErrMsg("Erreur d'exécution de " + describe + " : " + err.Error())
+			}
+			return err
+		}
+		fmt.Print(out)
 	}
-	fmt.Printf("%s", out)
-
-	cmd = exec.Command("eb", "deploy", "-l", version, "-m", comment)
-	out, err = cmd.Output()
-	if err != nil {
-		return fmt.Errorf("erreur d'exécution eb deploy : %v", err)
-	}
-	fmt.Printf("%s", out)
 
 	return nil
 }
@@ -264,35 +226,45 @@ func copyFilesAndDirs(src, dest string) error {
 	var dirs []string
 	files, err := ioutil.ReadDir(src)
 	if err != nil {
-		return fmt.Errorf("impossible de lire le contenu du répertoire %s : %v", src, err)
+		PrintErrMsg("Impossible de lire le contenu du répertoire" + src + " : " +
+			err.Error())
+		return err
 	}
 	for _, file := range files {
 		if file.IsDir() {
-			if err = os.Mkdir(dest+"\\"+file.Name(), os.ModeDir|os.ModePerm); err != nil {
-				return fmt.Errorf("impossible de créer le répertoire %s : %v", file.Name(), err)
+			if err = os.Mkdir(path.Join(dest, file.Name()), os.ModeDir|os.ModePerm); err != nil {
+				PrintErrMsg("Impossible de créer le répertoire " + file.Name() + " : " +
+					err.Error())
+				return err
 			}
 			dirs = append(dirs, file.Name())
 			continue
 		}
 		if file.Mode().IsRegular() {
-			src, err := os.Open(src + "\\" + file.Name())
+			src, err := os.Open(path.Join(src, file.Name()))
 			if err != nil {
-				return fmt.Errorf("impossible d'ouvrir le fichier %s : %v", file.Name(), err)
+				PrintErrMsg("Impossible d'ouvrir le fichier " + file.Name() + " : " +
+					err.Error())
+				return err
 			}
 			defer src.Close()
-			dst, err := os.Create(dest + "\\" + file.Name())
+			dst, err := os.Create(path.Join(dest, file.Name()))
 			if err != nil {
-				return fmt.Errorf("impossible d'ouvrir le fichier %s : %v", file.Name(), err)
+				PrintErrMsg("Impossible de créer le fichier " + file.Name() + " : " +
+					err.Error())
+				return err
 			}
 			defer dst.Close()
 			_, err = io.Copy(dst, src)
 			if err != nil {
-				return fmt.Errorf("impossible de copier le fichier %s : %v", file.Name(), err)
+				PrintErrMsg("Impossible de copier le fichier " + file.Name() + " : " +
+					err.Error())
+				return err
 			}
 		}
 	}
 	for _, d := range dirs {
-		if err = copyFilesAndDirs(src+"\\"+d, dest+"\\"+d); err != nil {
+		if err = copyFilesAndDirs(path.Join(src, d), path.Join(dest, d)); err != nil {
 			return err
 		}
 	}

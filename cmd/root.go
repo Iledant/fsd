@@ -30,12 +30,14 @@ type fullStackCfg struct {
 }
 
 type partCfg struct {
-	Path        string   `yaml:"path"`
-	Command     string   `yaml:"command"`
-	Args        []string `yaml:"args"`
-	Environment []envVar `yaml:"environment"`
-	Message     string
-	No          bool
+	Path           string   `yaml:"path"`
+	VersionCommand string   `yaml:"version_command"`
+	VersionArgs    []string `yaml:"version_args"`
+	Command        string   `yaml:"command"`
+	Args           []string `yaml:"args"`
+	Environment    []envVar `yaml:"environment"`
+	Message        string
+	No             bool
 }
 
 type envVar struct {

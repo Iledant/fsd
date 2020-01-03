@@ -53,12 +53,28 @@ type command struct {
 }
 
 func launch(c fullStackCfg) error {
+	PrintSuccessMsg("Récupération des numéros de version")
+
+	ebVersion := getEBVersion(c.Deploy.Path)
+	gitVersion := getGitVersion(c.Deploy.Path)
+	fmt.Printf("Version eb %s, version git %s\n", ebVersion, gitVersion)
+
+	version, err := askUser("Numéro de version", true)
+	if err != nil {
+		return err
+	}
+
+	comment, err := askUser("Commentaire", true)
+	if err != nil {
+		return err
+	}
+
 	c.BackEnd.Message = "Compilation du backend"
 	c.BackEnd.No = noBackend
 	c.FrontEnd.Message = "Compilation du frontend"
 	c.FrontEnd.No = noFrontend
 
-	bCh, fCh := launchPart(c.BackEnd), launchPart(c.FrontEnd)
+	bCh, fCh := launchPart(c.BackEnd, ""), launchPart(c.FrontEnd, version)
 	b, f := <-bCh, <-fCh
 
 	if b != nil {
@@ -69,13 +85,13 @@ func launch(c fullStackCfg) error {
 	}
 
 	PrintSuccessMsg("Déploiement")
-	return launchDeploy(c.Deploy)
+	return launchDeploy(c.Deploy, version, comment)
 }
 
-func launchPart(p partCfg) <-chan error {
+func launchPart(p partCfg, version string) <-chan error {
 	e := make(chan error)
 
-	go func() {
+	go func(version string) {
 		defer close(e)
 		if p.No {
 			e <- nil
@@ -86,6 +102,25 @@ func launchPart(p partCfg) <-chan error {
 			if err := os.Setenv(env.Name, env.Value); err != nil {
 				e <- err
 				return
+			}
+		}
+		if p.VersionCommand != "" && version != "" {
+			args := append(p.VersionArgs, version)
+			cmd := exec.Command(p.VersionCommand, args...)
+			cmd.Dir = p.Path
+			out, err := cmd.Output()
+			if err != nil {
+				var errMsg *exec.ExitError
+				if errors.As(err, &errMsg) {
+					PrintErrMsg(string(errMsg.Stderr))
+				} else {
+					PrintErrMsg("Erreur d'exécution de" + p.VersionCommand + " : " + err.Error())
+				}
+				e <- err
+				return
+			}
+			if len(out) > 0 {
+				fmt.Print(string(out))
 			}
 		}
 		cmd := exec.Command(p.Command, p.Args...)
@@ -107,13 +142,14 @@ func launchPart(p partCfg) <-chan error {
 			fmt.Println("Fin de " + p.Message)
 		}
 		e <- nil
-	}()
+	}(version)
 
 	return e
 }
 
-func getEBVersion() string {
+func getEBVersion(path string) string {
 	cmd := exec.Command("eb", "status")
+	cmd.Dir = path
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -136,8 +172,9 @@ func getEBVersion() string {
 	return string(extract[:j])
 }
 
-func getGitVersion() string {
+func getGitVersion(path string) string {
 	cmd := exec.Command("git", "describe")
+	cmd.Dir = path
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -151,13 +188,7 @@ func getGitVersion() string {
 	return string(out[:l+1])
 }
 
-func launchDeploy(d deployCfg) error {
-	if err := os.Chdir(d.Path); err != nil {
-		PrintErrMsg("Erreur lors du changement de répertoire vers " + d.Path +
-			" : " + err.Error())
-		return err
-	}
-
+func launchDeploy(d deployCfg, version string, comment string) error {
 	dest := path.Join(d.Path, d.Dist.Dest)
 	if err := os.RemoveAll(dest); err != nil {
 		PrintErrMsg("Erreur lors de la suppression du répertoire dist :" + err.Error())
@@ -169,20 +200,6 @@ func launchDeploy(d deployCfg) error {
 		return err
 	}
 	if err := copyFilesAndDirs(d.Dist.Source, dest); err != nil {
-		return err
-	}
-
-	ebVersion := getEBVersion()
-	gitVersion := getGitVersion()
-	fmt.Printf("Version eb %s, version git %s\n", ebVersion, gitVersion)
-
-	version, err := askUser("Numéro de version", true)
-	if err != nil {
-		return err
-	}
-
-	comment, err := askUser("Commentaire", true)
-	if err != nil {
 		return err
 	}
 
@@ -206,6 +223,7 @@ func launchDeploy(d deployCfg) error {
 
 	for _, c := range commands {
 		cmd := exec.Command(c.AppName, c.AppArgs...)
+		cmd.Dir = d.Path
 		out, err := cmd.Output()
 		if err != nil {
 			describe := c.AppName

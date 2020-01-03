@@ -22,6 +22,16 @@ var dbCopyCmd = &cobra.Command{
 		}
 		for _, app := range cfg.Application {
 			if args[0] == app.Name {
+				if app.AWSDatabase.User == "" || app.AWSDatabase.Password == "" ||
+					app.AWSDatabase.Address == "" || app.AWSDatabase.Port == "" ||
+					app.AWSDatabase.Name == "" || app.LocalDatabase.User == "" ||
+					app.LocalDatabase.Password == "" || app.LocalDatabase.Address == "" ||
+					app.LocalDatabase.Port == "" || app.LocalDatabase.Name == "" {
+					errMsg := "Configuration incomplète des bases de données de l'application \"" +
+						args[0] + "\" "
+					PrintErrMsg(errMsg)
+					return errors.New(errMsg)
+				}
 				return nil
 			}
 		}
@@ -48,7 +58,7 @@ func dbCopy(c fullStackCfg) error {
 	}
 	defer os.Remove(tmpFile.Name())
 
-	PrintSuccessMsg("Dump de la base AWS")
+	PrintSuccessMsg("Dump de la base Local")
 	awsPostgresString := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s",
 		c.AWSDatabase.User, c.AWSDatabase.Password, c.AWSDatabase.Address,
 		c.AWSDatabase.Port, c.AWSDatabase.Name)

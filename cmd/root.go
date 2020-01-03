@@ -23,10 +23,12 @@ type config struct {
 }
 
 type fullStackCfg struct {
-	Name     string    `yaml:"name"`
-	BackEnd  partCfg   `yaml:"backend"`
-	FrontEnd partCfg   `yaml:"frontend"`
-	Deploy   deployCfg `yaml:"deploy"`
+	Name          string    `yaml:"name"`
+	BackEnd       partCfg   `yaml:"backend"`
+	FrontEnd      partCfg   `yaml:"frontend"`
+	AWSDatabase   database  `yaml:"aws_database"`
+	LocalDatabase database  `yaml:"local_database"`
+	Deploy        deployCfg `yaml:"deploy"`
 }
 
 type partCfg struct {
@@ -56,6 +58,14 @@ type dist struct {
 	Dest   string `yaml:"dest"`
 }
 
+type database struct {
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Address  string `yaml:"address"`
+	Port     string `yaml:"port"`
+	Name     string `yaml:"name"`
+}
+
 // Execute launches the commands
 func Execute() error {
 	return rootCmd.Execute()
@@ -65,6 +75,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(listCommand)
+	rootCmd.AddCommand(dbCopyCmd)
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "",
 		"fichier de configuration, par défaut ~/.fsd.yaml")
 

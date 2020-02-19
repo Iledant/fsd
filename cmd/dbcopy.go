@@ -12,7 +12,7 @@ import (
 )
 
 var dbCopyCmd = &cobra.Command{
-	Use:   "db_copy <nom de l'application",
+	Use:   "db_copy <nom de l'application>",
 	Short: "Copie en local la base de données d'AWS",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 {

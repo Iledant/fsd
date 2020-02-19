@@ -28,6 +28,7 @@ type fullStackCfg struct {
 	FrontEnd      partCfg   `yaml:"frontend"`
 	AWSDatabase   database  `yaml:"aws_database"`
 	LocalDatabase database  `yaml:"local_database"`
+	TestRepo      string    `yaml:"test_repo"`
 	Deploy        deployCfg `yaml:"deploy"`
 }
 
@@ -76,6 +77,8 @@ func init() {
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(listCommand)
 	rootCmd.AddCommand(dbCopyCmd)
+	rootCmd.AddCommand(testRestoreCmd)
+	rootCmd.AddCommand(testSaveCmd)
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "",
 		"fichier de configuration, par défaut ~/.fsd.yaml")
 

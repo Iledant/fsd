@@ -49,7 +49,7 @@ func testSave(c fullStackCfg) error {
 	localPostgresString := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s",
 		c.LocalDatabase.User, c.LocalDatabase.Password, c.LocalDatabase.Address,
 		c.LocalDatabase.Port, c.LocalDatabase.Name)
-	cmd := exec.Command(`C:\Program Files\PostgreSQL\11\bin\pg_dump.exe`,
+	cmd := exec.Command(cfg.PostgreSQLPath+`pg_dump.exe`,
 		"-d", localPostgresString, "-Fc", "-f", c.TestRepo)
 	out, err := cmd.Output()
 	if err != nil {

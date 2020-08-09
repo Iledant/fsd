@@ -19,7 +19,8 @@ var (
 )
 
 type config struct {
-	Application []fullStackCfg `yaml:"application"`
+	Application    []fullStackCfg `yaml:"application"`
+	PostgreSQLPath string         `yaml:"PostgreSQLPath"`
 }
 
 type fullStackCfg struct {
